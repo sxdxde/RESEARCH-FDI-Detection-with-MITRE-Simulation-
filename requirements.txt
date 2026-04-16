@@ -6,3 +6,7 @@ matplotlib==3.8.3
 scikit-learn==1.4.1
 jupyter==1.0.0
 pytest==8.0.0
+# Real-time demo server
+fastapi>=0.103.0
+uvicorn[standard]>=0.23.0
+rich>=13.7.0

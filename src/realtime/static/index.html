@@ -1,0 +1,774 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MITRE ATT&CK ICS · EV FDI Detection</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+  <style>
+    :root {
+      --bg:      #0a0e1a;
+      --panel:   #0d1117;
+      --panel2:  #161b22;
+      --border:  #21262d;
+      --text:    #c9d1d9;
+      --muted:   #6e7681;
+      --green:   #3fb950;
+      --red:     #f85149;
+      --amber:   #d29922;
+      --blue:    #58a6ff;
+      --purple:  #bc8cff;
+      --orange:  #e3b341;
+      --cyan:    #39d353;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg); color: var(--text);
+      font-family: 'Segoe UI','SF Pro Display',system-ui,sans-serif;
+      font-size: 13px; height: 100vh;
+      display: flex; flex-direction: column; overflow: hidden;
+    }
+
+    /* ── Header ─── */
+    header {
+      background: var(--panel); border-bottom: 1px solid var(--border);
+      padding: 9px 18px; display: flex; align-items: center;
+      justify-content: space-between; flex-shrink: 0;
+    }
+    .header-left { display: flex; align-items: center; gap: 12px; }
+    .header-title { font-size: 14px; font-weight: 600; }
+    .header-sub   { font-size: 11px; color: var(--muted); margin-top: 2px; }
+    .mitre-badge {
+      background: #1c2333; border: 1px solid #3a3f4b;
+      border-radius: 5px; padding: 3px 9px;
+      font-size: 11px; color: var(--blue); font-weight: 600; letter-spacing: 0.5px;
+    }
+
+    /* ── Model toggle ─── */
+    .model-toggle {
+      display: flex; gap: 4px;
+      background: var(--panel2); border: 1px solid var(--border);
+      border-radius: 6px; padding: 3px;
+    }
+    .model-btn {
+      padding: 4px 12px; border-radius: 4px; border: none;
+      font-size: 11px; font-weight: 600; cursor: pointer;
+      background: transparent; color: var(--muted);
+      transition: all 0.15s; letter-spacing: 0.3px;
+    }
+    .model-btn.active {
+      background: var(--blue); color: #0d1117;
+    }
+
+    /* ── Status pill ─── */
+    #status-pill {
+      display: flex; align-items: center; gap: 7px;
+      padding: 5px 13px; border-radius: 20px;
+      font-weight: 700; font-size: 12px; letter-spacing: 0.5px;
+      transition: all 0.3s;
+      background: rgba(63,185,80,0.1); border: 1px solid rgba(63,185,80,0.35);
+      color: var(--green);
+    }
+    #status-pill.attack {
+      background: rgba(248,81,73,0.13); border-color: rgba(248,81,73,0.55);
+      color: var(--red); animation: pulse-red 0.9s infinite;
+    }
+    #status-pill.spike {
+      background: rgba(227,179,65,0.1); border-color: rgba(227,179,65,0.45);
+      color: var(--orange);
+    }
+    .status-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+    @keyframes pulse-red {
+      0%,100% { box-shadow: 0 0 0 0 rgba(248,81,73,.4); }
+      50%      { box-shadow: 0 0 0 5px rgba(248,81,73,0); }
+    }
+    #step-counter { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+    /* ── Main layout ─── */
+    .main {
+      flex: 1; display: grid;
+      grid-template-columns: 225px 1fr 265px;
+      overflow: hidden;
+    }
+    .panel {
+      background: var(--panel); border-right: 1px solid var(--border);
+      overflow-y: auto; padding: 12px;
+    }
+    .panel:last-child { border-right: none; border-left: 1px solid var(--border); }
+    .panel-title {
+      font-size: 10px; font-weight: 600; letter-spacing: 1.2px;
+      text-transform: uppercase; color: var(--muted);
+      margin-bottom: 9px; padding-bottom: 5px; border-bottom: 1px solid var(--border);
+    }
+
+    /* ── Stats ─── */
+    .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; margin-bottom: 10px; }
+    .stat-box {
+      background: var(--panel2); border: 1px solid var(--border);
+      border-radius: 5px; padding: 7px; text-align: center;
+    }
+    .stat-label { font-size: 10px; color: var(--muted); margin-bottom: 2px; }
+    .stat-value { font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .stat-value.green  { color: var(--green); }
+    .stat-value.red    { color: var(--red); }
+    .stat-value.amber  { color: var(--amber); }
+    .stat-value.blue   { color: var(--blue); }
+    .metric-row {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 4px 0; border-bottom: 1px solid var(--border); font-size: 12px;
+    }
+    .metric-row:last-child { border-bottom: none; }
+    .metric-name  { color: var(--muted); }
+    .metric-value { font-weight: 600; font-variant-numeric: tabular-nums; }
+    .section { margin-top: 12px; }
+
+    /* ── MITRE card ─── */
+    .mitre-card {
+      background: var(--panel2); border: 1px solid var(--border);
+      border-radius: 5px; padding: 9px; margin-top: 7px; transition: all 0.25s;
+    }
+    .mitre-card.active {
+      border-color: rgba(248,81,73,0.5); background: rgba(248,81,73,0.05);
+    }
+    .mitre-tid   { font-size: 14px; font-weight: 700; color: var(--red); font-family: monospace; }
+    .mitre-tname { font-size: 12px; font-weight: 600; margin: 2px 0; }
+    .mitre-tactic{ font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.8px; }
+    .mitre-desc  { font-size: 11px; color: var(--muted); margin-top: 4px; line-height: 1.5; }
+
+    /* ── Detection method badges ─── */
+    .det-badges { display: flex; gap: 5px; margin-top: 7px; flex-wrap: wrap; }
+    .det-badge {
+      font-size: 10px; font-weight: 700; padding: 2px 7px;
+      border-radius: 3px; letter-spacing: 0.4px;
+      opacity: 0.35; transition: opacity 0.2s;
+    }
+    .det-badge.active { opacity: 1; }
+    .det-badge.cusum { background: rgba(188,140,255,0.15); color: var(--purple); border: 1px solid rgba(188,140,255,0.4); }
+    .det-badge.iqr   { background: rgba(227,179,65,0.12);  color: var(--amber);  border: 1px solid rgba(227,179,65,0.4);  }
+
+    /* ── Confidence bar ─── */
+    .confidence-wrap { margin-top: 8px; }
+    .confidence-label {
+      display: flex; justify-content: space-between;
+      font-size: 11px; color: var(--muted); margin-bottom: 3px;
+    }
+    .confidence-bar-bg {
+      background: var(--panel2); border: 1px solid var(--border);
+      border-radius: 3px; height: 7px; overflow: hidden;
+    }
+    #confidence-bar {
+      height: 100%; width: 0%;
+      background: linear-gradient(90deg, var(--green), var(--orange), var(--red));
+      border-radius: 3px; transition: width 0.2s;
+    }
+
+    /* ── Progress ─── */
+    .progress-bg {
+      background: var(--panel2); border: 1px solid var(--border);
+      border-radius: 3px; height: 3px; overflow: hidden; margin-top: 5px;
+    }
+    #progress-bar { height: 100%; width: 0%; background: var(--blue); transition: width 0.1s; }
+
+    /* ── Chart ─── */
+    .chart-area {
+      background: var(--bg); display: flex; flex-direction: column; overflow: hidden;
+    }
+    .chart-header {
+      padding: 9px 14px 5px; display: flex; align-items: center;
+      justify-content: space-between; border-bottom: 1px solid var(--border);
+    }
+    .chart-title { font-size: 12px; font-weight: 600; }
+    #model-label { font-size: 11px; color: var(--blue); font-weight: 600; }
+    .chart-legend {
+      display: flex; gap: 10px; font-size: 10px; color: var(--muted);
+    }
+    .legend-dot {
+      display: inline-block; width: 7px; height: 7px;
+      border-radius: 50%; margin-right: 3px;
+    }
+    .chart-container { flex: 1; padding: 6px 10px; position: relative; min-height: 0; }
+    canvas { width: 100% !important; height: 100% !important; }
+
+    /* ── Controls ─── */
+    .ctrl-group { margin-bottom: 12px; }
+    .ctrl-label {
+      display: flex; justify-content: space-between;
+      font-size: 11px; color: var(--muted); margin-bottom: 4px;
+    }
+    .ctrl-label span { font-weight: 600; color: var(--text); }
+
+    input[type="range"] {
+      -webkit-appearance: none; width: 100%; height: 4px;
+      background: var(--panel2); border: 1px solid var(--border);
+      border-radius: 2px; outline: none;
+    }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none; width: 13px; height: 13px;
+      border-radius: 50%; background: var(--blue); cursor: pointer;
+    }
+
+    select {
+      width: 100%; background: var(--panel2); border: 1px solid var(--border);
+      color: var(--text); padding: 5px 7px; border-radius: 4px;
+      font-size: 12px; outline: none;
+    }
+
+    .btn {
+      width: 100%; padding: 7px; border: 1px solid var(--border);
+      border-radius: 5px; background: var(--panel2); color: var(--text);
+      font-size: 12px; font-weight: 600; cursor: pointer;
+      transition: all 0.15s; margin-bottom: 5px; letter-spacing: 0.3px;
+    }
+    .btn:hover { opacity: 0.85; }
+    .btn.primary { background: rgba(88,166,255,0.1);  border-color: rgba(88,166,255,0.35); color: var(--blue);   }
+    .btn.danger  { background: rgba(248,81,73,0.1);   border-color: rgba(248,81,73,0.4);   color: var(--red);    }
+    .btn.success { background: rgba(63,185,80,0.1);   border-color: rgba(63,185,80,0.35);  color: var(--green);  }
+    .btn.warning { background: rgba(227,179,65,0.1);  border-color: rgba(227,179,65,0.4);  color: var(--amber);  }
+
+    .scenario-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-bottom: 10px; }
+    .scenario-btn {
+      padding: 5px 3px; font-size: 10px; font-weight: 600; cursor: pointer;
+      border-radius: 4px; border: 1px solid var(--border); background: var(--panel2);
+      color: var(--muted); text-align: center; transition: all 0.15s;
+      text-transform: uppercase; letter-spacing: 0.3px;
+    }
+    .scenario-btn:hover { color: var(--text); border-color: #444; }
+    .scenario-btn.active { border-color: var(--blue); color: var(--blue); }
+
+    .divider { border: none; border-top: 1px solid var(--border); margin: 9px 0; }
+
+    /* ── Event log ─── */
+    .log-bar {
+      background: var(--panel); border-top: 1px solid var(--border);
+      flex-shrink: 0; height: 130px; display: flex; flex-direction: column;
+    }
+    .log-header {
+      padding: 5px 14px; border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .log-title { font-size: 10px; font-weight: 600; letter-spacing: 1.2px; text-transform: uppercase; color: var(--muted); }
+    #log-count { font-size: 10px; color: var(--muted); }
+    #event-log {
+      flex: 1; overflow-y: auto; padding: 3px 0;
+      font-family: 'SF Mono','Fira Code','Cascadia Code',monospace; font-size: 11px;
+    }
+    #event-log::-webkit-scrollbar { width: 3px; }
+    #event-log::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+    .log-entry {
+      display: flex; align-items: center; gap: 8px;
+      padding: 2px 14px; border-left: 3px solid transparent;
+    }
+    .log-entry:hover { background: var(--panel2); }
+    .log-entry.attack { border-left-color: var(--red);   }
+    .log-entry.spike  { border-left-color: var(--amber); }
+    .log-time  { color: var(--muted); min-width: 54px; }
+    .log-step  { color: var(--muted); min-width: 48px; }
+    .log-tag {
+      font-size: 10px; font-weight: 700; padding: 1px 5px;
+      border-radius: 3px; min-width: 76px; text-align: center; letter-spacing: 0.3px;
+    }
+    .log-tag.clean    { background: rgba(63,185,80,0.1);  color: var(--green); }
+    .log-tag.spike    { background: rgba(227,179,65,0.1); color: var(--amber); }
+    .log-tag.detected { background: rgba(248,81,73,0.13); color: var(--red);   }
+    .log-method { font-size: 10px; font-weight: 700; color: var(--purple); min-width: 42px; }
+    .log-info  { color: var(--muted); flex: 1; }
+
+    /* ── Overlay ─── */
+    #overlay {
+      position: fixed; inset: 0; background: rgba(10,14,26,0.92);
+      display: flex; align-items: center; justify-content: center; z-index: 100;
+    }
+    #overlay.hidden { display: none; }
+    .overlay-box {
+      background: var(--panel); border: 1px solid var(--border);
+      border-radius: 10px; padding: 34px 44px; text-align: center;
+    }
+    .overlay-title { font-size: 19px; font-weight: 700; margin-bottom: 7px; }
+    .overlay-sub { color: var(--muted); font-size: 13px; margin-bottom: 18px; }
+    .spinner {
+      width: 34px; height: 34px; border: 3px solid var(--border);
+      border-top-color: var(--blue); border-radius: 50%;
+      animation: spin 0.8s linear infinite; margin: 0 auto;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+
+<div id="overlay">
+  <div class="overlay-box">
+    <div class="overlay-title">EV FDI Detection Demo</div>
+    <div class="overlay-sub">Connecting &amp; loading models (NARX + BiLSTM)…</div>
+    <div class="spinner"></div>
+  </div>
+</div>
+
+<!-- Header -->
+<header>
+  <div class="header-left">
+    <div>
+      <div class="header-title">⚡ EV Charging — False Data Injection Detection</div>
+      <div class="header-sub">CUSUM + IQR Detector · MITRE ATT&CK for ICS · ACN-Data-Static</div>
+    </div>
+    <div class="mitre-badge">T0836 · Modify Parameter</div>
+  </div>
+  <div style="display:flex;align-items:center;gap:12px;">
+    <!-- Model toggle -->
+    <div class="model-toggle">
+      <button class="model-btn active" id="btn-narx"   onclick="switchModel('narx')">NARX</button>
+      <button class="model-btn"        id="btn-bilstm" onclick="switchModel('bilstm')">BiLSTM</button>
+    </div>
+    <div id="step-counter">t = 0</div>
+    <div id="status-pill">
+      <span class="status-dot"></span>
+      <span id="status-text">CLEAN</span>
+    </div>
+  </div>
+</header>
+
+<div class="main">
+
+  <!-- ── LEFT: Stats ─── -->
+  <div class="panel">
+    <div class="panel-title">Detection Statistics</div>
+
+    <div class="stat-grid">
+      <div class="stat-box"><div class="stat-label">True Pos</div>
+        <div class="stat-value green" id="s-tp">0</div></div>
+      <div class="stat-box"><div class="stat-label">False Pos</div>
+        <div class="stat-value amber" id="s-fp">0</div></div>
+      <div class="stat-box"><div class="stat-label">False Neg</div>
+        <div class="stat-value red" id="s-fn">0</div></div>
+      <div class="stat-box"><div class="stat-label">True Neg</div>
+        <div class="stat-value blue" id="s-tn">0</div></div>
+    </div>
+
+    <div class="metric-row"><span class="metric-name">F1 Score</span>
+      <span class="metric-value" id="s-f1">—</span></div>
+    <div class="metric-row"><span class="metric-name">Precision</span>
+      <span class="metric-value" id="s-prec">—</span></div>
+    <div class="metric-row"><span class="metric-name">Recall</span>
+      <span class="metric-value" id="s-rec">—</span></div>
+    <div class="metric-row"><span class="metric-name">Accuracy</span>
+      <span class="metric-value" id="s-acc">—</span></div>
+    <div class="metric-row"><span class="metric-name">Samples</span>
+      <span class="metric-value" id="s-total">0</span></div>
+
+    <!-- Active detectors -->
+    <div class="section">
+      <div class="panel-title">Active Detector</div>
+      <div class="det-badges">
+        <span class="det-badge cusum" id="badge-cusum">CUSUM</span>
+        <span class="det-badge iqr"   id="badge-iqr">IQR q=3</span>
+      </div>
+    </div>
+
+    <!-- MITRE card -->
+    <div class="section">
+      <div class="panel-title">Active Technique</div>
+      <div class="mitre-card" id="mitre-card">
+        <div style="color:var(--muted);font-size:11px;">No active attack</div>
+      </div>
+    </div>
+
+    <!-- Confidence -->
+    <div class="section">
+      <div class="panel-title">CUSUM Alarm Confidence</div>
+      <div class="confidence-wrap">
+        <div class="confidence-label">
+          <span>0%</span><span id="conf-pct">0%</span><span>100%</span>
+        </div>
+        <div class="confidence-bar-bg"><div id="confidence-bar"></div></div>
+      </div>
+    </div>
+
+    <!-- Progress -->
+    <div class="section">
+      <div class="panel-title">Dataset Progress</div>
+      <div class="progress-bg"><div id="progress-bar"></div></div>
+      <div style="display:flex;justify-content:space-between;margin-top:4px;font-size:10px;color:var(--muted);">
+        <span id="prog-label">0 / —</span>
+        <span id="loop-label">Loop 1</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── CENTRE: Chart ─── -->
+  <div class="chart-area">
+    <div class="chart-header">
+      <span class="chart-title">
+        Error-on-Estimation (EoE) · Real-Time ·
+        <span id="model-label">NARX</span>
+      </span>
+      <div class="chart-legend">
+        <span><span class="legend-dot" style="background:var(--blue)"></span>EoE</span>
+        <span><span class="legend-dot" style="background:var(--orange)"></span>IQR thresh</span>
+        <span><span class="legend-dot" style="background:var(--purple)"></span>CUSUM alarm</span>
+        <span><span class="legend-dot" style="background:var(--green)"></span>Clean</span>
+        <span><span class="legend-dot" style="background:var(--amber)"></span>Attack active</span>
+        <span><span class="legend-dot" style="background:var(--red)"></span>Detected</span>
+      </div>
+    </div>
+    <div class="chart-container"><canvas id="eoe-chart"></canvas></div>
+  </div>
+
+  <!-- ── RIGHT: Controls ─── -->
+  <div class="panel">
+    <div class="panel-title">Simulation Controls</div>
+
+    <!-- Scenarios -->
+    <div class="ctrl-group">
+      <div class="ctrl-label">Quick Scenarios</div>
+      <div class="scenario-grid">
+        <div class="scenario-btn" id="sc-clean"      onclick="setScenario('clean')">Clean</div>
+        <div class="scenario-btn" id="sc-subtle"     onclick="setScenario('subtle')">Subtle θ=5</div>
+        <div class="scenario-btn" id="sc-moderate"   onclick="setScenario('moderate')">Moderate</div>
+        <div class="scenario-btn" id="sc-aggressive" onclick="setScenario('aggressive')">Aggr.</div>
+      </div>
+    </div>
+
+    <!-- Speed -->
+    <div class="ctrl-group">
+      <div class="ctrl-label">Simulation Speed <span id="speed-label">10 t/s</span></div>
+      <input type="range" id="speed-slider" min="1" max="200" value="10"
+             oninput="updateSpeed(this.value)">
+    </div>
+
+    <!-- Attack probability -->
+    <div class="ctrl-group">
+      <div class="ctrl-label">Auto-Attack Probability <span id="prob-label">0%</span></div>
+      <input type="range" id="prob-slider" min="0" max="50" value="0"
+             oninput="updateProb(this.value)">
+    </div>
+
+    <!-- Theta -->
+    <div class="ctrl-group">
+      <div class="ctrl-label">θ — Attack Intensity <span id="theta-label">20 min</span></div>
+      <select id="theta-select" onchange="updateTheta(this.value)">
+        <option value="1">θ = 1 min (Imperceptible)</option>
+        <option value="5">θ = 5 min (Subtle)</option>
+        <option value="10">θ = 10 min (Low)</option>
+        <option value="20" selected>θ = 20 min (Moderate)</option>
+        <option value="30">θ = 30 min (High)</option>
+        <option value="60">θ = 60 min (Aggressive)</option>
+      </select>
+    </div>
+
+    <!-- Sensitivity -->
+    <div class="ctrl-group">
+      <div class="ctrl-label">
+        Detection Sensitivity
+        <span id="sens-label">5 (Balanced)</span>
+      </div>
+      <input type="range" id="sens-slider" min="1" max="10" value="5"
+             oninput="updateSens(this.value)">
+      <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-top:3px;">
+        <span>Conservative ↑Precision</span>
+        <span>Aggressive ↑Recall</span>
+      </div>
+    </div>
+
+    <hr class="divider">
+
+    <button class="btn danger"   onclick="injectAttack()">⚡ Inject T0836 Attack NOW</button>
+    <button class="btn warning"  onclick="stopAttack()">■ Stop Current Attack</button>
+
+    <hr class="divider">
+
+    <button class="btn primary" id="pause-btn" onclick="togglePause()">⏸ Pause</button>
+    <button class="btn success" onclick="resetSim()">↺ Reset Statistics</button>
+
+    <hr class="divider">
+
+    <div class="panel-title" style="margin-top:2px;">Detection Logic</div>
+    <div style="font-size:10px;color:var(--muted);line-height:1.8;margin-top:4px;">
+      <div><span style="color:var(--purple);font-weight:700;">CUSUM</span>: accumulates EoE − μ_clean each step → alarm at 5σ (catches θ≥5)</div>
+      <div><span style="color:var(--amber);font-weight:700;">IQR</span>: 3 consecutive spikes &gt; Q3+k·IQR → alarm (strong bursts only)</div>
+      <div>detected = CUSUM <b>OR</b> IQR</div>
+      <hr class="divider">
+      <div>θ=1 min : CUSUM needs ~30+ steps → likely undetected</div>
+      <div>θ=5 min : CUSUM alarms in ~6 steps ✓</div>
+      <div>θ=20 min: CUSUM alarms in ~2 steps ✓✓</div>
+    </div>
+  </div>
+</div>
+
+<!-- Event log -->
+<div class="log-bar">
+  <div class="log-header">
+    <span class="log-title">Detection Event Log</span>
+    <span id="log-count">0 events</span>
+  </div>
+  <div id="event-log"></div>
+</div>
+
+<script>
+"use strict";
+
+let ws = null, paused = false, logCount = 0;
+const MAX_LOG = 200, MAX_CHART_PTS = 150;
+
+// ── Chart ─────────────────────────────────────────────────────────
+const ctx = document.getElementById("eoe-chart").getContext("2d");
+const eoeData = [], eoeColors = [], iqrData = [], cusumData = [], labels = [];
+
+const chart = new Chart(ctx, {
+  type: "line",
+  data: {
+    labels,
+    datasets: [
+      { label:"EoE", data:eoeData,
+        borderColor:"rgba(88,166,255,0.75)", backgroundColor:"rgba(88,166,255,0.04)",
+        borderWidth:1.2, pointRadius:3, pointBackgroundColor:eoeColors,
+        pointBorderWidth:0, tension:0.2, fill:true, order:2 },
+      { label:"IQR Threshold", data:iqrData,
+        borderColor:"rgba(227,179,65,0.65)", borderWidth:1.4,
+        borderDash:[5,3], pointRadius:0, fill:false, order:0 },
+      { label:"CUSUM Alarm", data:cusumData,
+        borderColor:"rgba(188,140,255,0.6)", borderWidth:1.4,
+        borderDash:[3,4], pointRadius:0, fill:false, order:1 },
+    ],
+  },
+  options: {
+    animation: false,
+    responsive: true,
+    maintainAspectRatio: false,
+    interaction: { mode:"nearest", intersect:false },
+    scales: {
+      x: { grid:{ color:"rgba(33,38,45,0.8)" }, ticks:{ color:"#6e7681", maxTicksLimit:8, font:{size:10} }, border:{color:"#21262d"} },
+      y: { grid:{ color:"rgba(33,38,45,0.8)" }, ticks:{ color:"#6e7681", font:{size:10}, callback:v=>v.toFixed(4) }, border:{color:"#21262d"}, min:0 },
+    },
+    plugins: {
+      legend:{ display:false },
+      tooltip:{
+        backgroundColor:"#161b22", borderColor:"#21262d", borderWidth:1,
+        titleColor:"#c9d1d9", bodyColor:"#8b949e",
+        callbacks:{ label: ctx => ` ${ctx.dataset.label}: ${ctx.parsed.y.toFixed(6)}` },
+      },
+    },
+  },
+});
+
+function chartAdd(t, eoe, iqr_ub, cusum_h, detected, attackActive, isSpike) {
+  const color = detected ? "#f85149" : (attackActive ? "#d29922" : (isSpike ? "#e3b341" : "#3fb950"));
+  labels.push(`t=${t}`);
+  eoeData.push(eoe); eoeColors.push(color);
+  iqrData.push(iqr_ub); cusumData.push(cusum_h);
+
+  if (labels.length > MAX_CHART_PTS) {
+    labels.shift();
+    eoeData.shift(); eoeColors.shift();
+    iqrData.shift(); cusumData.shift();
+  }
+  chart.update("none");
+}
+
+// ── Handle tick ───────────────────────────────────────────────────
+function handleTick(d) {
+  chartAdd(d.t, d.eoe, d.threshold_iqr, d.threshold_cusum,
+           d.detected, d.attack_active, d.is_spike);
+
+  document.getElementById("step-counter").textContent = `t = ${d.t.toLocaleString()}`;
+  document.getElementById("prog-label").textContent   = `${d.t.toLocaleString()} / ${d.n_total.toLocaleString()}`;
+  document.getElementById("loop-label").textContent   = `Loop ${d.loop}`;
+  document.getElementById("progress-bar").style.width = `${(d.t/d.n_total*100).toFixed(1)}%`;
+  document.getElementById("model-label").textContent  = d.model;
+
+  // Status pill
+  const pill = document.getElementById("status-pill");
+  const txt  = document.getElementById("status-text");
+  if (d.detected) {
+    pill.className = "attack";
+    txt.textContent = `DETECTED [${d.det_method}]`;
+  } else if (d.attack_active) {
+    pill.className = "spike";
+    txt.textContent = `T0836 · θ=${d.theta}m`;
+  } else {
+    pill.className = "";
+    txt.textContent = "CLEAN";
+  }
+
+  // Metrics
+  const m = d.metrics;
+  document.getElementById("s-tp").textContent    = m.tp;
+  document.getElementById("s-fp").textContent    = m.fp;
+  document.getElementById("s-fn").textContent    = m.fn;
+  document.getElementById("s-tn").textContent    = m.tn;
+  document.getElementById("s-total").textContent = m.total.toLocaleString();
+  document.getElementById("s-f1").textContent    = m.total > 0 ? m.f1.toFixed(4)       : "—";
+  document.getElementById("s-prec").textContent  = m.total > 0 ? m.precision.toFixed(4) : "—";
+  document.getElementById("s-rec").textContent   = m.total > 0 ? m.recall.toFixed(4)    : "—";
+  document.getElementById("s-acc").textContent   = m.total > 0 ? m.accuracy.toFixed(4)  : "—";
+
+  // Confidence bar
+  const pct = (d.confidence * 100).toFixed(0);
+  document.getElementById("confidence-bar").style.width = `${pct}%`;
+  document.getElementById("conf-pct").textContent = `${pct}%`;
+
+  // Detector badges
+  document.getElementById("badge-cusum").classList.toggle("active", d.cusum_detected);
+  document.getElementById("badge-iqr").classList.toggle("active",   d.iqr_detected);
+
+  // MITRE card
+  const card = document.getElementById("mitre-card");
+  if (d.attack_active && d.technique_id) {
+    card.className = "mitre-card active";
+    card.innerHTML = `
+      <div class="mitre-tid">${d.technique_id}</div>
+      <div class="mitre-tname">${d.technique_name}</div>
+      <div class="mitre-tactic">${d.tactic}</div>
+      <div class="mitre-desc">
+        θ = ${d.theta} min · scale ×${(1 + d.theta/60).toFixed(2)}<br>
+        ${d.burst_remaining} timesteps remaining
+      </div>`;
+  } else {
+    card.className = "mitre-card";
+    card.innerHTML = `<div style="color:var(--muted);font-size:11px;">No active attack</div>`;
+  }
+
+  // Log (every interesting event, or every 10 clean steps)
+  if (d.detected || d.attack_active || d.is_spike || d.t % 10 === 0) addLogEntry(d);
+}
+
+// ── Event log ─────────────────────────────────────────────────────
+function addLogEntry(d) {
+  const log = document.getElementById("event-log");
+  const now = new Date();
+  const ts  = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+  function pad(n) { return String(n).padStart(2,"0"); }
+
+  let cls, tagCls, tag, method = "", info;
+  if (d.detected) {
+    cls="attack"; tagCls="detected"; tag="⚠ DETECTED";
+    method = d.det_method;
+    info = `${d.technique_id} θ=${d.theta}m · EoE=${d.eoe.toFixed(4)} · conf=${(d.confidence*100).toFixed(0)}%`;
+  } else if (d.attack_active) {
+    cls="spike"; tagCls="spike"; tag=d.technique_id;
+    info = `Injected · EoE=${d.eoe.toFixed(4)} · burst=${d.burst_remaining}ts`;
+  } else if (d.is_spike) {
+    cls="spike"; tagCls="spike"; tag="SPIKE";
+    info = `EoE=${d.eoe.toFixed(4)} > IQR bound`;
+  } else {
+    cls=""; tagCls="clean"; tag="CLEAN";
+    info = `EoE=${d.eoe.toFixed(4)}`;
+  }
+
+  const el = document.createElement("div");
+  el.className = `log-entry ${cls}`;
+  el.innerHTML = `
+    <span class="log-time">${ts}</span>
+    <span class="log-step">t=${d.t}</span>
+    <span class="log-tag ${tagCls}">${tag}</span>
+    <span class="log-method">${method}</span>
+    <span class="log-info">${info}</span>`;
+
+  log.insertBefore(el, log.firstChild);
+  logCount++;
+  while (log.children.length > MAX_LOG) log.removeChild(log.lastChild);
+  document.getElementById("log-count").textContent = `${logCount} events`;
+}
+
+// ── WebSocket ─────────────────────────────────────────────────────
+function connect() {
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  ws = new WebSocket(`${proto}://${location.host}/ws`);
+
+  ws.onopen = () => {
+    document.getElementById("overlay").classList.add("hidden");
+    console.log("[WS] Connected");
+  };
+
+  ws.onmessage = e => {
+    const d = JSON.parse(e.data);
+    if (d.type === "tick")  handleTick(d);
+    if (d.type === "error") alert(`Server error: ${d.msg}`);
+  };
+
+  ws.onclose = () => {
+    document.getElementById("overlay").classList.remove("hidden");
+    document.querySelector(".overlay-sub").textContent = "Connection lost — reconnecting…";
+    setTimeout(connect, 2000);
+  };
+}
+
+function send(msg) {
+  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
+}
+
+// ── Controls ──────────────────────────────────────────────────────
+function updateSpeed(v) {
+  document.getElementById("speed-label").textContent = `${v} t/s`;
+  send({ action:"set_speed", value:parseFloat(v) });
+}
+function updateProb(v) {
+  document.getElementById("prob-label").textContent = `${v}%`;
+  send({ action:"set_attack_prob", value:parseFloat(v)/100 });
+}
+function updateTheta(v) {
+  document.getElementById("theta-label").textContent = `${v} min`;
+  send({ action:"set_theta", value:parseFloat(v) });
+}
+function updateSens(v) {
+  const labels = { 1:"Conservative", 2:"Low", 3:"Moderate-Low", 4:"Moderate",
+                   5:"Balanced", 6:"Sensitive", 7:"High", 8:"Very High",
+                   9:"Aggressive", 10:"Max Sensitivity" };
+  document.getElementById("sens-label").textContent = `${v} (${labels[v]||""})`;
+  send({ action:"set_sensitivity", value:parseInt(v) });
+}
+function injectAttack() {
+  send({ action:"inject_now", duration:15 });
+}
+function stopAttack() {
+  send({ action:"stop_attack" });
+}
+function togglePause() {
+  paused = !paused;
+  const btn = document.getElementById("pause-btn");
+  if (paused) {
+    send({ action:"pause" });
+    btn.textContent = "▶ Resume"; btn.className = "btn success";
+  } else {
+    send({ action:"resume" });
+    btn.textContent = "⏸ Pause"; btn.className = "btn primary";
+  }
+}
+function resetSim() {
+  send({ action:"reset" });
+  labels.length = eoeData.length = eoeColors.length =
+  iqrData.length = cusumData.length = 0;
+  chart.update("none");
+  ["s-tp","s-fp","s-fn","s-tn","s-total"].forEach(id => document.getElementById(id).textContent = "0");
+  ["s-f1","s-prec","s-rec","s-acc"].forEach(id => document.getElementById(id).textContent = "—");
+  document.getElementById("event-log").innerHTML = "";
+  logCount = 0; document.getElementById("log-count").textContent = "0 events";
+  document.getElementById("confidence-bar").style.width = "0%";
+  document.getElementById("conf-pct").textContent = "0%";
+}
+
+function switchModel(name) {
+  document.getElementById("btn-narx").classList.toggle("active", name === "narx");
+  document.getElementById("btn-bilstm").classList.toggle("active", name === "bilstm");
+  send({ action:"set_model", value:name });
+  resetSim();   // clear chart/stats for fresh comparison
+}
+
+let _activeScenario = "";
+function setScenario(name) {
+  ["clean","subtle","moderate","aggressive"].forEach(s =>
+    document.getElementById(`sc-${s}`).classList.toggle("active", s === name));
+  _activeScenario = name;
+  const m = { clean:{prob:0,theta:20,speed:10}, subtle:{prob:3,theta:5,speed:15},
+              moderate:{prob:8,theta:20,speed:20}, aggressive:{prob:15,theta:60,speed:20} }[name];
+  document.getElementById("prob-slider").value        = m.prob;
+  document.getElementById("prob-label").textContent   = `${m.prob}%`;
+  document.getElementById("theta-select").value       = m.theta;
+  document.getElementById("theta-label").textContent  = `${m.theta} min`;
+  document.getElementById("speed-slider").value       = m.speed;
+  document.getElementById("speed-label").textContent  = `${m.speed} t/s`;
+  send({ action:"scenario", name });
+}
+
+connect();
+</script>
+</body>
+</html>

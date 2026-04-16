@@ -1,3 +1,7 @@
 #os stuff
 .DS_Store
 
+data/ACN-Data-Static/
+data/processed/
+__pycache__/
+*.pyc
