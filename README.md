@@ -33,6 +33,122 @@ Training set: 10,000 sessions / 480,512 windows — Estimation set: 5,000 sessio
 
 ---
 
+## Results & Visualisations
+
+### Main Comparison — NARX vs Attention-BiLSTM vs Naive (10-panel collage)
+
+> Final pipeline with 4-D IF features and distribution-shift cap. This is the key figure from the paper.
+
+![10-panel model comparison](results/compr2.png)
+
+---
+
+### Model Comparison Summary
+
+![Model comparison metrics](results/model_comparison.png)
+
+---
+
+### Stage 1 — NARX + IF–CUSUM Detection Timeline
+
+> Per-site detection output from the NARX estimator with the two-stage IF–CUSUM pipeline.
+
+![NARX IF–CUSUM detection](results/cusum_if_detection.png)
+
+---
+
+### Stage 1 — Attention-BiLSTM + IF–CUSUM Detection Timeline
+
+> Same two-stage pipeline applied to the BiLSTM estimator.
+
+![BiLSTM IF–CUSUM detection](results/cusum_if_bilstm_detection.png)
+
+---
+
+### Detailed Evaluation — NARX vs Traditional
+
+![NARX vs traditional evaluation](results/eval_narx_traditional.png)
+
+### Detailed Evaluation — Attention-BiLSTM vs Traditional
+
+![BiLSTM vs traditional evaluation](results/eval_bilstm_traditional.png)
+
+---
+
+### Confusion Matrices
+
+![Confusion matrices](results/fig5_confusion_matrices.png)
+
+![Extended confusion matrices](results/fig_cm.png)
+
+---
+
+### EoE Score Distributions (Normal vs Attacked)
+
+> Separation between clean and attacked Error-on-Estimation distributions across sessions.
+
+![EoE distributions](results/fig1_eoe_distributions.png)
+
+---
+
+### ROC & Precision-Recall Curves
+
+![ROC and PR curves](results/fig2_roc_pr_curves.png)
+
+---
+
+### Detection Timeline (Temporal)
+
+> Timestep-level detection signal showing where FDI attacks are flagged across the estimation set.
+
+![Detection timeline](results/fig6_detection_timeline.png)
+
+---
+
+### F1 Score vs Attack Scale (φ)
+
+> How detection performance varies as the FDI injection magnitude φ is swept from 0.5× to 3×.
+
+![F1 vs attack scale](results/fig3_f1_vs_scale.png)
+
+---
+
+### Multi-Seed Robustness
+
+> F1 scores across 5 random seeds — demonstrates that results are not sensitive to initialisation.
+
+![Multi-seed robustness](results/fig4_multiseed_robustness.png)
+
+---
+
+### Ablation Study
+
+> Contribution of each component (IF dimensionality, CUSUM cap, calibration strategy) to final F1.
+
+![Ablation study](results/fig_ablation.png)
+
+---
+
+### Training Stage Diagnostics
+
+| Stage 1 | Stage 2 |
+|---|---|
+| ![Stage 1](results/fig_stage1.png) | ![Stage 2](results/fig_stage2.png) |
+
+---
+
+### Label Distribution
+
+![Label distribution](results/fig_labels.png)
+
+---
+
+### Earlier Comparison Run (First IF+CUSUM Iteration)
+
+![First comparison](results/comparison.png)
+
+---
+
 ## Project Layout
 
 ```
