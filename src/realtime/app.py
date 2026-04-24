@@ -195,8 +195,13 @@ async def index() -> FileResponse:
 async def ws_endpoint(ws: WebSocket) -> None:
     await ws.accept()
 
-    if not _READY:
-        await ws.send_json({"type": "error", "msg": "Model still loading — retry in a moment"})
+    # Wait up to 120 s for models to finish loading before proceeding
+    for _ in range(240):
+        if _READY:
+            break
+        await asyncio.sleep(0.5)
+    else:
+        await ws.send_json({"type": "error", "msg": "Model loading timed out"})
         await ws.close()
         return
 

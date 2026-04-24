@@ -27,56 +27,51 @@
   Charging Infrastructure Using Attention-Based Bidirectional LSTM 
   with Adaptive Isolation Forest–CUSUM}
 
-\author{Sudarshan~Sudhakar,~\IEEEmembership{Student~Member,~IEEE}
+\author{Sudarshan~Sudhakar CS23B2007
 \thanks{Manuscript received April 2026.
-S.~Sudhakar is with the Department of Information Security,
-School of Computing, Vellore Institute of Technology,
-Chennai 600127, India
-(e-mail: sudarshan.sudhakar@ieee.org).}}
+S.~Sudhakar is with the Indian Institute of Information Technology, Design and Manufacturing Kancheepuram,
+Chennai 600127, India, under the supervision of Dr.~Bhale Pradeepkumar Gajendra
+(e-mail: cs23b2007@iiitdm.ac.in).}}
 
 \maketitle
 
 % ----------------------------------------------------------------
 \begin{abstract}
-False Data Injection~(FDI) attacks on Electric Vehicle~(EV)
-charging infrastructure represent a critical class of cyberthreat
-that simultaneously compromises billing integrity, grid scheduling
-accuracy, and demand-response reliability.
-Existing detection schemes rely either on simplistic statistical
-thresholds that fail under low-amplitude perturbations, or on
-supervised classifiers that require labelled attack data unavailable
-in real deployments.
-This paper proposes a comprehensive extension of the NARX-based FDI
-detection framework to the large-scale, publicly available
-ACN-Data-Static dataset, comprising over 85\,000 charging sessions
-from three California sites.
-Two complementary neural energy estimators are investigated: a
-\emph{Nonlinear Auto-Regressive with eXogenous inputs}~(NARX)
-network~(171 parameters) and an
-\emph{Attention-enhanced Bidirectional LSTM}~(Attention-BiLSTM)
+False Data Injection~(FDI) attacks targeting Electric Vehicle~(EV)
+charging metering are harder to catch than they look: an adversary
+who inflates reported session energy by only $1$--$2\times$ the
+normal 5-minute delivery can overbill a fleet by tens of thousands
+of dollars annually while staying well below the gross-error bounds
+used by existing rule-based detectors.
+Labelled attack traces are rarely available in operational settings,
+so supervised classifiers are largely off the table.
+This work extends a NARX-based FDI detection pipeline to the
+ACN-Data-Static dataset --- over 85\,000 real charging sessions from
+three California sites --- and examines whether two very different
+neural energy estimators can generate a clean enough estimation-error
+signal for a downstream anomaly detector to act on.
+The first estimator is a compact \emph{Nonlinear Auto-Regressive
+with eXogenous inputs}~(NARX) network with just 171 parameters;
+the second is an \emph{Attention-enhanced Bidirectional LSTM}
 ($\approx$2.16\,M parameters).
-Both estimators feed into a novel \emph{adaptive two-stage
-Isolation Forest--Cumulative Sum~(IF--CUSUM)} detector that
-augments the conventional one-dimensional Error-of-Estimation~(EoE)
-signal with four engineered temporal features
-$[\varepsilon,\,\varepsilon^2,\,|\Delta\varepsilon|,\,z_{\rm loc}]$
-and calibrates the CUSUM threshold via a
-\emph{distribution-shift cap}
-$h_{\rm cap} = 3.5\,p_{99}(\text{EoE}_{\rm clean})$.
-This cap prevents the detector from over-fitting to stronger attacks
-present in the validation slice, a systematic bias that
-silently suppressed recall by up to 29 percentage points in prior work.
-The NARX-based system achieves an F1-score of \textbf{97.9\%}
-with recall of \textbf{99.9\%} and precision of \textbf{96.0\%}
-on realistic low-amplitude attacks ($\phi \in [1,2]$).
-The Attention-BiLSTM variant yields \textbf{97.0\%} F1 with
-\textbf{98.7\%} recall.
-A naive mean-predictor baseline records only \textbf{35.6\%} F1,
-confirming that estimator quality---not the downstream
-detector---is the primary performance driver.
-An ablation study quantifies the individual contributions of the
-4-D feature set and the distribution-shift cap.
-All experiments use provably zero session overlap between training
+Both feed into an \emph{adaptive two-stage Isolation
+Forest--CUSUM~(IF--CUSUM)} module.
+A key issue discovered during experiments was that unconstrained
+F1-maximisation on validation data silently tuned the CUSUM
+threshold to stronger validation attacks, causing it to miss
+roughly half of the lower-amplitude test attacks.
+The fix --- a \emph{distribution-shift cap}
+$h_{\rm cap}=3.5\,p_{99}(\text{EoE}_{\rm clean})$ --- recovered
+up to 29 recall percentage points.
+With the cap in place, the NARX pipeline reaches \textbf{97.9\%}
+F1 (\textbf{99.9\%} recall, \textbf{96.0\%} precision)
+and the Attention-BiLSTM variant reaches \textbf{97.0\%} F1
+(\textbf{98.7\%} recall).
+A naive mean predictor -- included as a sanity baseline -- scores
+only \textbf{35.6\%} F1, which makes clear that the estimator
+that generates the error signal matters far more than the
+choice of anomaly detector.
+All splits maintain strict zero session overlap between training
 and evaluation sets.
 \end{abstract}
 
@@ -114,33 +109,37 @@ anomaly detection, ACN-Data-Static, distribution-shift calibration.
 \end{IEEEdescription}
 
 % ================================================================
+
+% ================================================================
 \section{Introduction}
 \label{sec:intro}
 
 \subsection{Motivation and Challenges}
 
-The rapid proliferation of Electric Vehicles~(EVs) has elevated
-EV Supply Equipment~(EVSE) networks to critical grid
-infrastructure.
-A single fast-charger deployed at a public station draws power
-comparable to hundreds of residential loads; at fleet scale,
-coordinated charging constitutes a dispatchable demand-response
-resource worth hundreds of megawatt-hours~\cite{sun2020charging}.
-Utilities in California, Texas, and the European Union now depend
-on real-time EV demand signals for intraday load balancing,
-making data integrity at the session level a grid-security concern.
+As EV adoption has accelerated, charging networks have quietly
+crossed a threshold from consumer convenience to critical grid
+asset.
+A typical DC fast-charger can draw 50--150\,kW, comparable to
+hundreds of residential loads simultaneously; once fleets operate
+at scale, their aggregate charging load becomes a dispatchable
+demand-response resource worth hundreds of megawatt-hours~\cite{sun2020charging}.
+Utilities in California, Texas, and the EU already incorporate
+real-time EV demand telemetry into intraday load balancing,
+so corrupted session data is no longer just a billing problem---it
+becomes a grid-security concern.
 
-The underlying communication layer---predominantly the Open
-Charge Point Protocol~(OCPP) 1.6/2.0 over HTTP/WebSocket---was
-designed for interoperability, not adversarial robustness.
-An attacker who intercepts or spoofs session telemetry can
-silently inflate reported energy deliveries, triggering overbilling,
-corrupting grid scheduling, or masking overcurrent
+OCPP~1.6/2.0, the dominant charging communication standard, runs
+over plain HTTP or WebSocket and was designed primarily for
+interoperability rather than adversarial resistance~\cite{sarieddine2023}.
+An attacker with a man-in-the-middle position on this channel
+can silently replace the reported 5-minute energy value $y(t)$
+with an inflated figure, causing overbilling, distorting the
+aggregate demand forecast, or concealing overcurrent
 conditions~\cite{liu2011false}.
-Unlike control-plane attacks on SCADA or DNP3 protocols that can
-be detected by network intrusion systems, session-level FDI at the
-application layer is indistinguishable from normal traffic by
-conventional firewalls.
+Session-level FDI is particularly nasty from a detection standpoint:
+unlike SCADA intrusions that generate anomalous protocol traffic,
+a falsified \texttt{MeterValues.req} message looks exactly like a
+legitimate one to any firewall or network monitor.
 
 Despite its severity, \emph{low-amplitude} FDI in EV charging
 remains under-studied.
@@ -630,28 +629,30 @@ At $\mu_+=0.39$\,kWh, $\bar{\phi}=1.5$, and 10\% attack fraction
 over a fleet of 100 stations operating 16\,h/day, the annual
 overbilling exceeds \$50\,000 at commercial rates.
 
-Beyond billing fraud, falsified demand signals distort the
-aggregated load forecast fed to the grid scheduler.
-A 25\% overestimate in aggregate EV demand causes the utility's
-economic dispatch to procure excessive spinning reserve, increasing
-system operating costs and potentially destabilising local
-distribution feeders through unnecessary ramp-rate
-commands~\cite{sun2020charging}.
-In large-scale coordinated attacks (e.g., botnet-controlled
-charging stations), the injected false demand could be used to
-strategically congest transmission paths or trigger protective
-relay misoperations.
+The billing impact is only part of the picture.
+When falsified session telemetry propagates to the grid scheduler,
+a 25\% overestimate in aggregate EV demand forces the utility's
+economic dispatch to procure more spinning reserve than necessary,
+wasting money and potentially stressing local distribution
+feeders with unnecessary ramp-rate commands~\cite{sun2020charging}.
+At fleet scale---think a botnet that compromises hundreds of public
+chargers simultaneously---the attacker could strategically time the
+injections to congest specific transmission corridors or trigger
+protective relay misoperations, turning a billing fraud into a
+physical-grid incident.
 
 \subsection{Why NARX and Attention-BiLSTM for Estimation?}
 \label{sec:why}
 
 \textbf{No physical model required.}
-Both architectures learn $\hat{y}(t)$ from historical session
-data, requiring no knowledge of battery chemistry,
-charger topology, or grid parameters~\cite{basumatary2025}.
-This ``model-free'' property makes the estimator deployable
-across heterogeneous charger types (Level-1 through DC fast)
-and vehicle models without reengineering.
+Both the NARX and BiLSTM estimators learn $\hat{y}(t)$ purely
+from observed session traces, with no domain knowledge of battery
+chemistry, thermal models, or charger topology encoded
+explicitly~\cite{basumatary2025}.
+In practice this means the same trained model can be dropped onto
+a new site with different charger hardware without any
+reengineering, which matters a lot given the heterogeneity of
+real EV fleets.
 
 \textbf{Recurrent memory advantage.}
 NARX explicitly encodes autoregressive dependencies
@@ -713,16 +714,20 @@ captures the one-step EoE increment, and
 \end{equation}
 is the local $z$-score in a rolling window of $w=20$ steps.
 
-\textit{Motivation:} Random-timestep FDI attacks produce
-\emph{sudden spikes} in $\varepsilon$---large $|\Delta\varepsilon|$
-from the clean previous step and high $z_{\rm loc}$.
-Natural high-EoE events (session ramps, boundary transitions)
-exhibit \emph{gradual} EoE build-up: smaller $|\Delta\varepsilon|$
-and moderate $z_{\rm loc}$ relative to the local window.
-The squared term $\varepsilon^2$ amplifies the magnitude contrast,
-giving the IF tree splits better discriminative information.
-In practice, the 4-D IF achieves near-perfect recall ($\approx100\%$)
-while the CUSUM stage enforces precision via the AND gate.
+\textit{Why these four features?}\ When I examined the raw EoE
+traces, the clearest visual signature of a random-timestep injection
+was a sudden, isolated spike: the previous step is clean so
+$|\Delta\varepsilon|$ jumps sharply, and the local $z$-score
+$z_{\rm loc}$ spikes well above the 20-step rolling mean.
+By contrast, legitimate high-EoE events---session ramps,
+boundary transitions between idle and active charging---show a
+gradual build-up with moderate $|\Delta\varepsilon|$ and
+$z_{\rm loc}$.
+Including $\varepsilon^2$ amplifies the magnitude contrast and
+gives the isolation trees additional discriminative surface.
+In experiments, this 4-D IF produced near-perfect recall
+($\approx100\%$)); the CUSUM stage's AND gate then recovers
+precision.
 
 The IF is trained on $\{\mathbf{f}(t)\}_{t\in\mathcal{T}_{\rm clean}}$
 using $T=200$ isolation trees over a random subsample of
@@ -975,22 +980,24 @@ comparisons---feasible in seconds on commodity hardware.
 \label{sec:security}
 
 \textbf{Kerckhoffs-principle compliance.}
-The detector's security relies on the statistical separation
-between clean and attacked EoE distributions, not on secrecy of
-model weights or thresholds.
-An attacker who knows $h$ and $k$ can attempt to craft attacks
-with $|\varepsilon|<h$, but this requires knowledge of
-$\hat{y}(t)$ which depends on the private neural weights.
+The detector's security rests on the statistical gap between
+clean and attacked EoE distributions rather than on keeping
+the model weights secret.
+An attacker who learns the published threshold values $h$ and $k$
+could in principle target injections below those levels, but
+doing so requires independently estimating $\hat{y}(t)$, which
+depends on the private NARX weights.
 
 \textbf{Adaptive attacker.}
-An attacker who queries the NARX estimator can estimate $\hat{y}(t)$
-and craft $\tilde{y}(t) = \hat{y}(t) + \delta$ for small $\delta>0$.
-However, such an attacker has already replicated the estimator's
-function and provides limited billing fraud (small $\delta$).
-The minimum detectable inflation is $k + h \approx 0.16$\,kWh,
-corresponding to a 23\% per-session overcharge.
-For the attacker to evade detection while still profiting requires
-$\delta > 0.16$\,kWh, which triggers CUSUM with high probability.
+A more capable adversary might query the deployed estimator
+repeatedly to approximate $\hat{y}(t)$ and then inject only
+$\tilde{y}(t)=\hat{y}(t)+\delta$ for a small $\delta>0$.
+This evasion strategy is self-limiting: the smaller $\delta$ is
+kept to avoid detection, the smaller the billing fraud profit.
+From the numbers: $k+h\approx0.16$\,kWh sets the minimum
+detectable inflation, corresponding roughly to a 23\%
+per-session overcharge; an attacker who stays below this
+threshold gains very little financially.
 
 \textbf{Temporal correlation attack.}
 A sophisticated attacker might distribute the inflation across
@@ -1121,18 +1128,20 @@ Attack scale $\phi$             & $\mathcal{U}[1.0,\,2.0]$ \\
 
 \subsection{Training Under Normal Conditions}
 
-Both models are trained on clean, unattacked session data using
-the MSE loss:
+Both models are trained exclusively on clean, unattacked session
+data using standard MSE loss:
 \begin{equation}
   \mathcal{L} = \frac{1}{N}\sum_{t=1}^{N}
   \bigl(y(t) - \hat{y}(t)\bigr)^2.
   \label{eq:mse}
 \end{equation}
-Input features are MinMax-scaled to $[0,1]$; target values are
-clipped to $[0,1]$\,kWh prior to scaling to remove the small
-number of anomalously large readings caused by meter resets.
-Early stopping with patience 10 halts training when validation
-MSE does not improve, preventing overfitting.
+One preprocessing choice worth noting: target values were clipped
+to $[0,1]$\,kWh before MinMax scaling to remove a handful of
+spuriously large readings that turned out to be meter-reset
+artefacts in the raw ACN data; failing to clip these inflated
+the training MSE noticeably.
+Early stopping with patience~10 on validation MSE prevented
+overfitting without manual epoch tuning.
 
 Fig.~\ref{fig:trainplot} shows representative actual vs.\ estimated
 5-minute energy delivery over the first $3\times10^4$ training samples.
@@ -1293,10 +1302,12 @@ regime where attack EoE partially overlaps with the upper tail
 of the clean EoE distribution.
 
 Fig.~\ref{fig:roc} shows the ROC and precision-recall curves.
-Both NARX and BiLSTM achieve AUC $\approx$ 0.9997 and 0.9994
-respectively, closely tracking the ideal top-left corner.
-The Naive predictor degrades sharply, confirming that
-the neural estimator quality is the primary performance driver.
+Both NARX and BiLSTM sit extremely close to the ideal top-left
+corner (AUC~$\approx0.9997$ and $0.9994$), whereas the Naive
+predictor degrades sharply once recall is pushed above $\sim60\%$.
+This gap reinforces the central finding: it is the quality of
+the energy estimator, not the detector configuration, that
+determines how separable the clean and attacked EoE distributions are.
 
 \begin{figure}[!t]
 \centering
@@ -1309,18 +1320,20 @@ the neural estimator quality is the primary performance driver.
 
 \subsubsection{Stage Contribution}
 
-Panel~(h) of Fig.~\ref{fig:compr2} isolates the contribution
-of each stage.
-IF~alone achieves near-perfect recall ($\approx100\%$) but low
-precision ($\approx41\%$) because contamination $\rho=0.12$ flags
-12\% of clean data in stage 1.
-CUSUM~alone achieves recall $>99.5\%$ with precision $\approx94\%$
-due to the recall-priority threshold.
-The AND combination of both stages raises precision to 96\%
-while maintaining recall at 99.9\%, a gain of 55 precision
-percentage points over IF alone at negligible recall cost.
-This confirms the genuine complementarity of the two stages
-enabled by the 4-D feature engineering.
+Panel~(h) of Fig.~\ref{fig:compr2} isolates what each stage
+actually contributes.
+Stage~1 (IF alone) achieves near-perfect recall ($\approx100\%$)
+but its precision sits at only $\approx41\%$ because contamination
+$\rho=0.12$ causes the forest to flag roughly 12\% of clean data
+as suspicious.
+Stage~2 (CUSUM alone with the distribution-shift cap and
+recall-priority calibration) already does much better:
+recall $>99.5\%$ with precision $\approx94\%$.
+What the AND gate buys is an additional 55-point precision jump
+(from $\approx41\%$ to $96\%$) essentially for free in recall terms.
+This strong complementarity between the two stages only exists
+because the 4-D feature set gives the IF something genuinely
+different from what the CUSUM threshold is testing.
 
 \subsection{Ablation Study}
 \label{sec:ablation}
@@ -1358,18 +1371,20 @@ IF(4-D) + CUSUM + cap    & \textbf{99.57} & \textbf{96.0} & \textbf{99.9} & \tex
 \label{fig:ablation}
 \end{figure}
 
-The results reveal three key findings.
-First, the \emph{distribution-shift cap} is the single most
-impactful contribution: removing the cap (``CUSUM alone, no cap'')
-drops F1 from 96.9\% to 75.4\%, a loss of 21.5 points primarily
-through recall degradation from 99.9\% to 70.7\%.
-Second, upgrading the IF feature space from 1-D to 4-D improves
-F1 from 58.2\% to 68.7\%---the additional temporal features
-$|\Delta\varepsilon|$ and $z_{\rm loc}$ provide complementary
-discriminative information not captured by magnitude alone.
-Third, combining IF(4-D) with CUSUM+cap raises precision from
-94.1\% to 96.0\% at no recall cost, confirming that the AND gate
-suppresses IF false alarms without sacrificing true positives.
+Three observations stand out from the ablation table.
+The distribution-shift cap is by far the most impactful single
+change: disabling it (``CUSUM alone, no cap'') causes F1 to
+collapse from 96.9\% to 75.4\%, with recall dropping 29 points
+from 99.9\% to 70.7\%---exactly the calibration bias described
+in Section~\ref{sec:scheme}.
+Expanding the IF feature space from 1-D $\varepsilon$ to the
+4-D set lifts F1 from 58.2\% to 68.7\%; the key features are
+$|\Delta\varepsilon|$ and $z_{\rm loc}$, which encode the spike
+sharpness that magnitude alone does not capture.
+Finally, combining IF(4-D) with CUSUM and the cap pushes
+precision from 94.1\% to 96.0\% without touching recall,
+confirming that the AND gate cleanly suppresses Stage-1 false
+alarms with no side-effect on true positives.
 
 \subsection{Per-Site Performance Analysis}
 
@@ -1393,17 +1408,18 @@ Office-01 & 99.38 & 94.2 & 99.8 & 96.9 \\
 \end{tabular}
 \end{table}
 
-JPL achieves the highest F1 (98.5\%) because its sessions have
-lower energy variance (primarily long overnight workplace charging
-sessions), which produces a tighter clean EoE distribution and
-better CUSUM discrimination.
-Office-01 shows slightly lower precision (94.2\%) due to the
-shorter PHEV session durations, which generate more boundary
-transitions with elevated EoE that the IF stage occasionally
-flags as anomalous.
-Across all three sites, recall exceeds 99.8\%, confirming that
-the distribution-shift cap generalises across heterogeneous charging
-populations.
+JPL's sessions are predominantly long overnight workplace charges
+with low energy variance, which narrows the clean EoE distribution
+and makes threshold placement easier --- hence the highest
+site-level F1 of 98.5\%.
+Office-01 is the hardest site: short PHEV sessions generate
+frequent session-boundary transitions where EoE spikes briefly
+before settling, and the IF occasionally flags these as anomalous,
+holding precision at 94.2\%.
+Despite this spread, recall exceeds 99.8\% at every site, which
+suggests the distribution-shift cap is robustly handling the
+differences in charging-population statistics across the three
+deployments.
 
 \subsection{Attack Scale Sensitivity}
 \label{sec:scalesen}
@@ -1423,19 +1439,20 @@ scale factor $\phi$ for each system.
 \label{fig:scale}
 \end{figure}
 
-Both NARX and Attention-BiLSTM maintain F1 $>97\%$ across the
-entire range $\phi\in[1.0,\,3.0]$.
-The F1 curve for NARX rises from 96.5\% at $\phi=1.0$ to a
-plateau of 98.2\% at $\phi\geq1.5$; the slight improvement at
-higher scales reflects the increasing EoE magnitude that moves
-attacks further from the clean distribution tail.
-The Naive predictor saturates below 55\% even at $\phi=3.0$,
-confirming that mean-prediction errors produce a broad, overlapping
-EoE distribution that no downstream detector can cleanly
-separate.
-These results demonstrate that in the low-amplitude regime
-($\phi\leq2$), the estimator MSE is the critical design parameter,
-not the detector configuration.
+Both NARX and Attention-BiLSTM hold F1 above 97\% across
+$\phi\in[1.0,3.0]$.
+For NARX, F1 starts at 96.5\% at $\phi=1.0$ and plateaus near
+98.2\% once $\phi\geq1.5$; the modest upward trend makes sense
+because larger injections push the EoE further into the tail,
+making individual attack steps easier to isolate.
+The Naive predictor never breaks 55\%, even at $\phi=3.0$,
+because its high baseline estimation error produces an EoE
+distribution that heavily overlaps with the attack EoE regardless
+of attack amplitude.
+This tells me the dominant design decision is getting the
+estimator accurate enough, not fine-tuning the anomaly detector;
+in the low-amplitude regime ($\phi\leq2$), estimator MSE is the
+bottleneck.
 
 \subsection{Multi-Seed Robustness}
 \label{sec:multiseed}
@@ -1675,13 +1692,14 @@ End-to-end (NARX $\to$ alarm) & ARM + Cloud & $<10$\,ms \\
 \end{tabular}
 \end{table}
 
-The total end-to-end latency of $<10$\,ms is negligible relative
-to the 5-minute OCPP telemetry interval, confirming that the
-proposed scheme can operate in true real-time on commodity hardware
-without pipelining or batching optimisation.
-The NARX inference on the ARM M4 requires only 171 multiply-accumulate
-operations and 10 sigmoid evaluations, fitting entirely in the L1
-cache (32\,KB) and completing in sub-millisecond time.
+An end-to-end latency under 10\,ms against a 5-minute OCPP
+telemetry interval means the pipeline introduces essentially
+zero overhead---no pipelining or batching tricks required.
+What I found notable about the edge deployment is that the
+NARX's 171 multiply-accumulate operations and 10 sigmoid
+evaluations fit entirely within the Cortex-M4's 32\,KB L1
+cache, so the inference path never touches DRAM, which is
+why sub-millisecond completion is achievable even at 168\,MHz.
 
 \subsection{Practical Deployment Considerations}
 
@@ -1719,62 +1737,222 @@ In practice, alarms can be aggregated using a sliding-window
 majority vote (e.g., 3 alarms in 10 consecutive steps) to further
 reduce operator burden while retaining recall $>99\%$.
 
+%=================================================================
+\section*{MITRE ATT\&CK Attack Simulation Overview}
+\label{sec:mitre_overview}
+
+This paper accompanies a fully instrumented real-time attack simulator
+that replays ACN-Data-Static sessions while injecting synthetic False
+Data Injection bursts mapped to the \textbf{MITRE ATT\&CK for ICS}
+framework~\cite{mitre_ics}.
+The following summarises the threat model, injection physics, emulator
+design, and interactive dashboard; complete implementation details
+appear in \texttt{src/attack/mitre\_fdi.py} and
+\texttt{src/realtime/app.py}.
+
+\subsection*{A.\; MITRE ATT\&CK Technique Chain}
+
+Three ICS techniques combine to form the end-to-end attack:
+
+\begin{enumerate}
+  \item \textbf{T0830 --- Adversary-in-the-Middle (Collection).}
+    The attacker establishes a man-in-the-middle position on the
+    HTTP/WebSocket link between the EVSE and the cloud Charging
+    Management System~(CMS).
+    OCPP~1.6 messages are intercepted, modified, and re-forwarded
+    in flight.
+    This is the \emph{delivery vector} for all subsequent manipulation
+    and requires no credentials or malware on the charging equipment.
+
+  \item \textbf{T0836 --- Modify Parameter (Impair Process Control).}
+    The primary offensive action.
+    The attacker inflates the \texttt{minutesAvailable} field in the
+    OCPP \texttt{StartTransaction} / \texttt{StatusNotification} message
+    by $\vartheta$~minutes ($\vartheta \in [1,\,60]$ in experiments).
+    The CMS trusts the falsified session record and schedules the
+    charger to deliver proportionally more energy, causing a sustained
+    upward shift in the EoE signal that the IF--CUSUM pipeline is
+    designed to detect.
+
+  \item \textbf{T0856 --- Spoof Reporting Message (Inhibit Response
+    Function).}
+    Once the CMS has accepted the falsified \texttt{minutesAvailable},
+    the corrupted value propagates into the billing and analytics
+    backends without any further validation.
+    The invoice the driver or fleet operator receives reflects the
+    inflated figure because the CMS never had access to an independent
+    energy meter reading to cross-check---a structural gap in the
+    current OCPP trust model.
+    Scaled across many stations, this silent discrepancy adds up
+    to substantial systematic fraud, independently of whatever
+    operational disruption the mis-scheduling causes.
+\end{enumerate}
+
+\subsection*{B.\; Injection Physics and Emulator Model}
+
+To avoid the \emph{zero-value blind-spot} of multiplicative injection
+(where $\tilde{y}=\phi\cdot 0 = 0$ leaves no EoE trace), the emulator
+uses an \textbf{additive} model:
+\begin{equation}
+  \tilde{y}(t) \;=\; y(t) + \underbrace{(\phi - 1)}_{\text{excess}}
+  \cdot \bar{y}_{+},
+  \qquad \phi = 1 + \frac{\vartheta}{\tau_{\rm ref}},
+  \label{eq:additive}
+\end{equation}
+where $\bar{y}_{+}$ is the mean positive delivery rate of the current
+session (kWh per 5-minute step) and
+$\tau_{\rm ref} = 60$~min is the reference session length.
+A noteworthy property of this formulation is that the excess term
+$(\phi-1)\bar{y}_{+}$ is non-zero even when the charger happens to
+be idle ($y(t)=0$), so every timestep within a burst contributes
+a detectable EoE increment rather than silently disappearing into
+a zero-delivery gap.
+
+Attacks arrive in \textbf{bursts}:
+\begin{itemize}
+  \item \emph{Manual burst} --- \texttt{start\_attack($\vartheta$,
+    duration)} injects exactly \texttt{duration} consecutive
+    timesteps at intensity~$\vartheta$.
+  \item \emph{Probabilistic auto-injection} ---
+    \texttt{maybe\_inject($y$,\,$p$)} starts a new burst of duration
+    $d \sim \mathcal{U}[10,25]$ with probability $p$ per step,
+    modelling a realistic adversary who activates sporadically.
+\end{itemize}
+The \texttt{MITREFDIAttacker} class exposes an \texttt{AttackStatus}
+dataclass at every timestep, carrying: active technique~ID and tactic,
+current~$\vartheta$, scale~factor~$\phi$, and burst countdown.
+This metadata is consumed by the dashboard to display ground-truth
+attack labels and MITRE attribution in real time.
+
+\subsection*{C.\; Real-Time Simulator and Dashboard}
+
+The simulator is implemented as a FastAPI application with a single
+persistent WebSocket connection (\texttt{/ws}).
+At startup the server pre-loads both the NARX and Attention-BiLSTM
+models, runs them over the estimation split, and calibrates per-model
+CUSUM and IQR thresholds from the clean EoE statistics.
+The WebSocket stream replays the dataset continuously at
+user-selectable speed.
+
+\medskip
+\noindent\textbf{Interactive controls:}
+\begin{itemize}
+  \item \emph{Model selector} --- switch between NARX and
+    Attention-BiLSTM live; the server restarts from $t=0$ with
+    recalibrated thresholds.
+  \item \emph{Speed slider} --- replay rate 1--200 timesteps/second.
+  \item \emph{Attack intensity $\vartheta$} --- extra minutes injected
+    (1--60~min, maps to $\phi \in [1.02,\,2.0]$ for
+    $\tau_{\rm ref}=60$~min).
+  \item \emph{Attack probability $p$} --- per-step auto-burst
+    probability (0--50\%).
+  \item \emph{Inject now / Stop} --- one-shot manual burst trigger
+    and abort.
+  \item \emph{Sensitivity slider (1--10)} --- scales alarm thresholds
+    by $\exp\!\bigl((5-s)\times0.3\bigr)$, covering a $\approx15:1$
+    dynamic range from conservative to aggressive.
+  \item \emph{Scenario presets}: \textsc{Clean} ($p=0$),
+    \textsc{Subtle} ($\vartheta=5$~min, $p=3\%$),
+    \textsc{Moderate} ($\vartheta=20$~min, $p=8\%$),
+    \textsc{Aggressive} ($\vartheta=60$~min, $p=15\%$).
+\end{itemize}
+
+\medskip
+\noindent Each WebSocket frame carries: raw signals
+($y_{\rm true}$, $\hat{y}$, $\tilde{y}$, EoE), CUSUM statistic
+$S(t)$ and effective alarm level, IQR spike flag, combined detection
+decision, active MITRE technique attribution, and a running confusion
+matrix (TP, FP, FN, TN, precision, recall, F1, accuracy) updated at
+every step.
+
+\medskip
+\noindent Figure~\ref{fig:ui_overview} shows a screenshot of the
+dashboard during a \textsc{Moderate} scenario
+($\vartheta=20$~min, $p=8\%$, NARX model active).
+
+\begin{figure}[!t]
+\centering
+\begin{subfigure}{\columnwidth}
+  \centering
+  \includegraphics[width=\columnwidth]{Screenshot 2026-04-21 at 3.22.01 PM.jpg}
+\end{subfigure}
+
+\vspace{2pt}
+
+\begin{subfigure}{\columnwidth}
+  \centering
+  \includegraphics[width=\columnwidth]{Screenshot 2026-04-21 at 3.23.22 PM.jpg}
+\end{subfigure}
+
+\caption{%
+  Real-time attack simulator dashboard (\textsc{Moderate} scenario:
+  $\vartheta=20$~min, $p=8\%$).
+ }
+\label{fig:ui_overview}
+\end{figure}
+
 % ================================================================
 \section{Conclusion}
 \label{sec:conclusion}
 
-This paper presented a comprehensive two-stage Isolation
-Forest--CUSUM framework for FDI attack detection in EV charging
-networks, validated on the ACN-Data-Static dataset with both
-NARX and Attention-BiLSTM estimators.
+This work set out to ask whether a two-stage IF--CUSUM detector,
+fed by a lightweight neural energy estimator, could reliably
+catch low-amplitude FDI on real EV charging data without ever
+seeing a labelled attack example.
+Testing on 333\,783 timesteps from ACN-Data-Static, the answer
+turned out to be yes, provided two design decisions are in place.
 
 \textbf{Key numerical results:}
-The NARX+IF--CUSUM scheme achieves \textbf{99.57\%} accuracy,
-\textbf{96.0\%} precision, \textbf{99.9\%} recall, and
-\textbf{97.9\%} F1-score.
-The Attention-BiLSTM variant achieves \textbf{99.39\%} accuracy
-and \textbf{97.0\%} F1-score.
-Both models surpass the naive mean-predictor baseline
-(F1\,=\,35.6\%) by more than 62 percentage points.
-In the HIL real-time experiment, attacks are detected within
-one 5-minute OCPP interval with no false alarms on the
-preceding 50-sample clean baseline.
+The NARX+IF--CUSUM configuration reaches \textbf{99.57\%}
+accuracy, \textbf{96.0\%} precision, \textbf{99.9\%} recall,
+and \textbf{97.9\%} F1.
+The Attention-BiLSTM variant scores \textbf{99.39\%} accuracy
+and \textbf{97.0\%} F1.
+Both beat the naive mean-predictor baseline (F1\,=\,35.6\%) by
+more than 62 percentage points.
+In the HIL experiment, attacks injected at timestep 50 were
+flagged by the very next processing cycle --- a one-interval,
+5-minute detection latency --- with no false alarms over the
+preceding 50 clean samples.
 
-\textbf{Methodological contributions:}
+\textbf{Methodological takeaways:}
 The \emph{distribution-shift cap}
-$h_{\rm cap}=3.5\,p_{99}(\text{EoE}_{\rm clean})$ is the most
-impactful contribution, recovering 21.5 F1 points over unconstrained
-CUSUM calibration by preventing threshold over-fitting to stronger
-validation-set attacks.
-The \emph{4-dimensional feature set}
+$h_{\rm cap}=3.5\,p_{99}(\text{EoE}_{\rm clean})$
+turned out to matter more than I initially expected.
+Without it, unconstrained F1-maximisation on validation data
+silently tuned the CUSUM threshold to the stronger validation
+attacks, causing it to miss roughly half the test injections
+and dropping F1 by 21.5 points.
+The \emph{4-D feature set}
 $[\varepsilon,\varepsilon^2,|\Delta\varepsilon|,z_{\rm loc}]$
-for the IF stage adds 10.5 F1 points over 1-D IF by exploiting
-the temporal spike structure of random-timestep attacks.
-Together, these two contributions account for the full performance
-gap between the proposed system and the strongest ablation
-baseline~(Global IQR, F1\,=\,74.6\%).
+for the IF stage adds 10.5 F1 points over a 1-D baseline by
+exploiting the temporal spike shape of random-timestep attacks;
+without these extra dimensions, IF and CUSUM are effectively
+testing the same thing.
 
-\textbf{Limitation:}
-The current evaluation injects attacks at independently chosen
-random timesteps.
-Temporally correlated multi-session attacks---where a botnet
-attacker distributes the inflation across many consecutive
-intervals to avoid large $|\Delta\varepsilon|$ spikes---may
-partially evade the CUSUM stage.
-The local $z$-score feature $z_{\rm loc}$ provides partial
-resistance to distributed attacks, but a dedicated window-level
-CUSUM statistic would improve detection under this scenario.
+\textbf{Limitations and open issues:}
+The injected attacks in this study arrive at independently drawn
+random timesteps, which produces the sharp $|\Delta\varepsilon|$
+spikes the 4-D IF was explicitly designed to catch.
+A more patient adversary who spreads the same total inflation
+across many consecutive intervals would generate smaller
+per-step deltas and a slower-rising $z_{\rm loc}$, partially
+undermining Stage~1.
+The rolling local $z$-score gives some resistance to distributed
+attacks, but a dedicated window-level CUSUM statistic would
+handle this more directly.
 
-\textbf{Future work} will (1)~incorporate site-level spatial
-correlation into the IF feature set to detect coordinated
-multi-EVSE attacks, (2)~explore transformer-based session encoders
-(e.g., Anomaly Transformer~\cite{xu2022anomaly}) as drop-in
-replacements for the BiLSTM estimator on cloud hardware,
-(3)~validate the framework on live OCPP data from a deployed
-campus charging network, and (4)~extend the threat model to
-include relay attacks that delay---rather than inflate---reported
-energy, which produce negative EoE spikes not captured by the
-current absolute-value formulation.
+\textbf{Planned extensions:}
+(1)~Incorporate cross-EVSE spatial correlation into the IF
+feature set to detect simultaneously coordinated fleet attacks;
+(2)~evaluate a transformer-based session encoder (e.g., Anomaly
+Transformer~\cite{xu2022anomaly}) as a drop-in replacement for
+the BiLSTM on cloud-tier hardware;
+(3)~validate the pipeline on live OCPP traces from an operational
+campus charging network;
+(4)~extend the attack model to relay-type attacks that delay
+rather than inflate reported energy, which produce negative EoE
+spikes not caught by the current absolute-value EoE formulation.
 
 % ================================================================
 \begin{thebibliography}{99}
@@ -1888,6 +2066,12 @@ G.~Pang, C.~Shen, L.~Cao, and A.~V.~D. Hengel,
 ``Deep learning for anomaly detection: A review,''
 \emph{ACM Comput.\ Surv.},
 vol.~54, no.~2, pp.~1--38, Mar.~2021.
+
+\bibitem{mitre_ics}
+MITRE Corporation,
+``MITRE ATT\&CK for Industrial Control Systems,''
+[Online]. Available: \url{https://attack.mitre.org/matrices/ics/}
+(accessed Apr.~2026).
 
 \end{thebibliography}
 

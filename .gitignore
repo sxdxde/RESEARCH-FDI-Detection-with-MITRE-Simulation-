@@ -5,3 +5,7 @@ data/ACN-Data-Static/
 data/processed/
 __pycache__/
 *.pyc
+
+# Large data files
+data/processed/acn_estim_clean.csv
+data/processed/acn_train_clean.csv
